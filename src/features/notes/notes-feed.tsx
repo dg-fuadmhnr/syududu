@@ -1,4 +1,15 @@
-import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
+import {
+  lazy,
+  Suspense,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+  type KeyboardEvent,
+} from 'react'
 import { RiDeleteBin6Line, RiPencilLine, RiImageAddLine, RiCloseLine } from '@remixicon/react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -174,6 +185,20 @@ function NoteEditDialog({
   )
   const [reading, setReading] = useState(false)
 
+  const blockBackspaceAtStart = (event: KeyboardEvent<HTMLTextAreaElement> | FormEvent<HTMLTextAreaElement>) => {
+    const textarea = event.currentTarget
+    const selectionStart = textarea.selectionStart ?? 0
+    const selectionEnd = textarea.selectionEnd ?? 0
+    const atStart = selectionStart === 0 && selectionEnd === 0
+    const nativeEvent = event.nativeEvent as InputEvent & { inputType?: string }
+    const deletingBackward =
+      ('key' in event && event.key === 'Backspace') || nativeEvent.inputType === 'deleteContentBackward'
+
+    if (atStart && deletingBackward && !('isComposing' in event && event.isComposing)) {
+      event.preventDefault()
+    }
+  }
+
   useEffect(() => {
     const textarea = bodyRef.current
     if (!textarea) return
@@ -223,6 +248,8 @@ function NoteEditDialog({
             data-autofocus
             value={body}
             onChange={(event) => setBody(event.target.value)}
+            onBeforeInput={blockBackspaceAtStart}
+            onKeyDown={blockBackspaceAtStart}
             className="min-h-48 text-base leading-6 sm:text-sm"
           />
 
