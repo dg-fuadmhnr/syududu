@@ -35,7 +35,7 @@ function getSelectedGroupKey(ownerId: string) {
   return `${GROUP_KEY}:${ownerId}`
 }
 
-function getDefaultGroupId(ownerId: string) {
+function getLegacyDefaultGroupId(ownerId: string) {
   return `syududu.default-group:${ownerId}`
 }
 
@@ -57,6 +57,38 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     const load = async () => {
       const ownerId = getOwnerId(session)
       let changed = false
+      const legacyGroupId = getLegacyDefaultGroupId(ownerId)
+
+      const legacyGroup = await db.groups.get(legacyGroupId)
+      if (legacyGroup) {
+        const migratedGroupId = crypto.randomUUID()
+        const legacyNotes = await db.notes.where('groupId').equals(legacyGroupId).toArray()
+
+        await db.transaction('rw', db.groups, db.notes, async () => {
+          await db.groups.put({
+            ...legacyGroup,
+            id: migratedGroupId,
+            updatedAt: nowIso(),
+            syncState: 'pending',
+          })
+
+          for (const note of legacyNotes) {
+            await db.notes.update(note.id, {
+              groupId: migratedGroupId,
+              updatedAt: nowIso(),
+              syncState: 'pending',
+            })
+          }
+
+          await db.groups.delete(legacyGroupId)
+        })
+
+        const selectedFromLegacy = localStorage.getItem(getSelectedGroupKey(ownerId)) ?? localStorage.getItem(GROUP_KEY)
+        if (selectedFromLegacy === legacyGroupId) {
+          localStorage.setItem(getSelectedGroupKey(ownerId), migratedGroupId)
+        }
+        changed = true
+      }
 
       if (session) {
         const [localGroups, localNotes] = await Promise.all([
@@ -95,7 +127,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
       if (existingGroups.length === 0) {
         const seedGroup: LocalGroup = {
-          id: getDefaultGroupId(ownerId),
+          id: crypto.randomUUID(),
           userId: ownerId,
           name: DEFAULT_GROUP_NAME,
           createdAt: nowIso(),
