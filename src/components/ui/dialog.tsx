@@ -60,7 +60,7 @@ function DialogContent({
 
     queueMicrotask(() => {
       const focusable = contentRef.current?.querySelector<HTMLElement>(
-        '[data-autofocus], textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        '[data-autofocus], textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
       )
       focusable?.focus()
     })
