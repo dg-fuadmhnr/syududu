@@ -1,10 +1,17 @@
 import { useState } from 'react'
 import { Navigate } from 'react-router-dom'
-import { RiMenuLine, RiMoonLine, RiSunLine, RiLogoutBoxRLine } from '@remixicon/react'
+import {
+  RiInformationLine,
+  RiMenuLine,
+  RiMoonLine,
+  RiSunLine,
+  RiLogoutBoxRLine,
+} from '@remixicon/react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
   Dialog,
+  DialogDescription,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -21,6 +28,7 @@ export function AppShell() {
   const { searchQuery, setSearchQuery } = useAppStore()
   const { theme, toggleTheme } = useTheme()
   const [groupsOpen, setGroupsOpen] = useState(false)
+  const [infoOpen, setInfoOpen] = useState(false)
 
   if (loading) {
     return (
@@ -61,7 +69,20 @@ export function AppShell() {
               onChange={(event) => setSearchQuery(event.target.value)}
             />
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="icon-sm" aria-label={theme === 'dark' ? 'Light mode' : 'Dark mode'} onClick={toggleTheme}>
+              <Button
+                variant="outline"
+                size="icon-sm"
+                aria-label="App info"
+                onClick={() => setInfoOpen(true)}
+              >
+                <RiInformationLine />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon-sm"
+                aria-label={theme === 'dark' ? 'Light mode' : 'Dark mode'}
+                onClick={toggleTheme}
+              >
                 {theme === 'dark' ? <RiSunLine /> : <RiMoonLine />}
               </Button>
               <Button variant="outline" size="icon-sm" aria-label="Sign out" onClick={() => void signOut()}>
@@ -89,6 +110,19 @@ export function AppShell() {
             <DialogTitle>Groups</DialogTitle>
           </DialogHeader>
           <GroupsSidebar />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
+        <DialogContent className="max-w-lg p-6 sm:p-7">
+          <DialogHeader>
+            <DialogTitle>syududu</DialogTitle>
+            <DialogDescription>created with laugh by Fuad Muhammad N</DialogDescription>
+          </DialogHeader>
+          <p className="text-base leading-8 text-foreground">
+            &quot;loh eh, maskodi alkaya&apos;mafa ii alakaya&apos;naka syududu ma faqoli inna ya
+            rasull al qoli inna kalyamafa? mus alas ali alak takola ya fima allah&quot;
+          </p>
         </DialogContent>
       </Dialog>
     </div>
