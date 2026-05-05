@@ -1,73 +1,131 @@
-# React + TypeScript + Vite
+# syududu
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Personal quick-capture note app with chat-like UI, offline-first storage, Supabase auth, and PWA support.
 
-Currently, two official plugins are available:
+## Stack
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- React + Vite + TypeScript
+- Tailwind CSS + shadcn/ui
+- Dexie.js for IndexedDB
+- Supabase JS client
+- React Router v7
+- `vite-plugin-pwa`
+- `react-markdown` + `react-syntax-highlighter`
 
-## React Compiler
+## Setup
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+1. Install deps.
+   ```bash
+   npm install
+   ```
+2. Copy env example.
+   ```bash
+   cp .env.example .env
+   ```
+3. Fill `.env` with:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_PUBLISHABLE_KEY`
+4. Create Supabase tables and RLS policies from SQL in this README.
+5. Run app.
+   ```bash
+   npm run dev
+   ```
 
-## Expanding the ESLint configuration
+## `.env.example`
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+Keep these keys in `.env.example`:
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+VITE_SUPABASE_URL=
+VITE_SUPABASE_PUBLISHABLE_KEY=
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Supabase SQL
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+Run this in Supabase SQL editor.
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```sql
+create extension if not exists pgcrypto;
+
+create table if not exists public.groups (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  name text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz null
+);
+
+create table if not exists public.notes (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  group_id uuid not null references public.groups(id) on delete cascade,
+  content text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz null
+);
+
+alter table public.groups enable row level security;
+alter table public.notes enable row level security;
+
+create policy "groups_select_own"
+on public.groups for select
+using (auth.uid() = user_id);
+
+create policy "groups_insert_own"
+on public.groups for insert
+with check (auth.uid() = user_id);
+
+create policy "groups_update_own"
+on public.groups for update
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+create policy "groups_delete_own"
+on public.groups for delete
+using (auth.uid() = user_id);
+
+create policy "notes_select_own"
+on public.notes for select
+using (auth.uid() = user_id);
+
+create policy "notes_insert_own"
+on public.notes for insert
+with check (auth.uid() = user_id);
+
+create policy "notes_update_own"
+on public.notes for update
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+create policy "notes_delete_own"
+on public.notes for delete
+using (auth.uid() = user_id);
+
+create or replace function public.set_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+drop trigger if exists groups_set_updated_at on public.groups;
+create trigger groups_set_updated_at
+before update on public.groups
+for each row execute function public.set_updated_at();
+
+drop trigger if exists notes_set_updated_at on public.notes;
+create trigger notes_set_updated_at
+before update on public.notes
+for each row execute function public.set_updated_at();
 ```
+
+## Notes
+
+- Auth uses Supabase email/password.
+- Notes and groups are offline-first: Dexie first, sync to Supabase when online.
+- App supports PWA install and offline caching.
