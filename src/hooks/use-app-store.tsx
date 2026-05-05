@@ -30,7 +30,7 @@ type AppStoreValue = {
 const AppStoreContext = createContext<AppStoreValue | null>(null)
 
 const GROUP_KEY = 'syududu.selected-group-id'
-const DEFAULT_GROUP_NAME = 'Personal'
+const DEFAULT_GROUP_NAME = 'Sample Groups'
 
 function nowIso() {
   return new Date().toISOString()
