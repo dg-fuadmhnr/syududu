@@ -4,6 +4,7 @@ import {
   RiInformationLine,
   RiMenuLine,
   RiMoonLine,
+  RiLoader4Line,
   RiRefreshLine,
   RiSunLine,
   RiLogoutBoxRLine,
@@ -26,7 +27,7 @@ import { useTheme } from '@/hooks/use-theme'
 
 export function AppShell() {
   const { session, loading, signOut } = useAuth()
-  const { searchQuery, setSearchQuery, syncNow } = useAppStore()
+  const { searchQuery, setSearchQuery, syncNow, isSyncing } = useAppStore()
   const { theme, toggleTheme } = useTheme()
   const [groupsOpen, setGroupsOpen] = useState(false)
   const [infoOpen, setInfoOpen] = useState(false)
@@ -70,9 +71,15 @@ export function AppShell() {
               onChange={(event) => setSearchQuery(event.target.value)}
             />
             <div className="flex items-center gap-2">
-              <Button variant="outline" className="h-10" onClick={() => void syncNow()}>
-                <RiRefreshLine />
-                <span>Sync</span>
+              <Button
+                variant="outline"
+                size="icon-sm"
+                aria-label="Sync now"
+                title="Sync now"
+                onClick={() => void syncNow()}
+                disabled={isSyncing}
+              >
+                {isSyncing ? <RiLoader4Line className="animate-spin" /> : <RiRefreshLine />}
               </Button>
               <Button
                 variant="outline"
@@ -130,6 +137,19 @@ export function AppShell() {
           </p>
         </DialogContent>
       </Dialog>
+
+      {isSyncing ? (
+        <div
+          className="fixed bottom-4 left-1/2 z-[60] -translate-x-1/2 rounded-full border border-border bg-background/95 px-4 py-2 text-sm shadow-lg backdrop-blur"
+          role="status"
+          aria-live="polite"
+        >
+          <span className="flex items-center gap-2">
+            <RiLoader4Line className="animate-spin" />
+            Syncing...
+          </span>
+        </div>
+      ) : null}
     </div>
   )
 }

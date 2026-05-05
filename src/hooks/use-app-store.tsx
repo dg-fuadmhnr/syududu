@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { db, type LocalGroup, type LocalNote, type LocalNoteAttachment } from '@/lib/db'
 import { useAuth } from '@/features/auth/auth-context'
 import {
@@ -24,6 +24,7 @@ type AppStoreValue = {
   editNote: (noteId: string, content: string, attachments?: DraftAttachment[]) => Promise<void>
   deleteNote: (noteId: string) => Promise<void>
   syncNow: () => Promise<void>
+  isSyncing: boolean
 }
 
 const AppStoreContext = createContext<AppStoreValue | null>(null)
@@ -59,6 +60,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const [selectedGroupId, setSelectedGroupIdState] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [syncTick, setSyncTick] = useState(0)
+  const [isSyncing, setIsSyncing] = useState(false)
+  const syncInFlightRef = useRef(false)
 
   useEffect(() => {
     let active = true
@@ -257,10 +260,19 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const syncNow = useCallback(async () => {
     if (!session || !navigator.onLine) return
+    if (syncInFlightRef.current) return
 
-    const { syncWithSupabase } = await import('@/lib/sync')
-    await syncWithSupabase(session)
-    await refresh()
+    syncInFlightRef.current = true
+    setIsSyncing(true)
+
+    try {
+      const { syncWithSupabase } = await import('@/lib/sync')
+      await syncWithSupabase(session)
+      await refresh()
+    } finally {
+      syncInFlightRef.current = false
+      setIsSyncing(false)
+    }
   }, [refresh, session])
 
   useEffect(() => {
@@ -524,6 +536,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         editNote,
         deleteNote,
         syncNow,
+        isSyncing,
       }}
     >
       {children}

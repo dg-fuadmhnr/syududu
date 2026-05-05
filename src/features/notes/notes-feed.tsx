@@ -1,4 +1,4 @@
-import { lazy, Suspense, useDeferredValue, useMemo, useRef, useState, type ChangeEvent } from 'react'
+import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { RiDeleteBin6Line, RiPencilLine, RiImageAddLine, RiCloseLine } from '@remixicon/react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -161,6 +161,7 @@ function NoteEditDialog({
   onSave: (content: string, attachments: DraftAttachment[]) => void
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const bodyRef = useRef<HTMLTextAreaElement | null>(null)
   const [body, setBody] = useState(note.content)
   const [draftAttachments, setDraftAttachments] = useState<DraftAttachmentItem[]>(
     attachments.map((attachment) => ({
@@ -172,6 +173,14 @@ function NoteEditDialog({
     })),
   )
   const [reading, setReading] = useState(false)
+
+  useEffect(() => {
+    const textarea = bodyRef.current
+    if (!textarea) return
+
+    textarea.focus()
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+  }, [])
 
   const addFiles = async (files: FileList | File[]) => {
     const nextFiles = Array.from(files).filter((file) => file.type.startsWith('image/'))
@@ -210,6 +219,7 @@ function NoteEditDialog({
         </DialogHeader>
         <div className="grid gap-3">
           <Textarea
+            ref={bodyRef}
             data-autofocus
             value={body}
             onChange={(event) => setBody(event.target.value)}
