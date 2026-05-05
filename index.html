@@ -2,10 +2,31 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="apple-touch-icon" href="/pwa-192x192.svg" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="theme-color" content="#f7f3ed" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (() => {
+        try {
+          const themeKey = 'syududu.theme'
+          const theme = localStorage.getItem(themeKey) ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+          const themeColor = theme === 'dark' ? '#0f0b09' : '#f7f3ed'
+          document.documentElement.classList.toggle('dark', theme === 'dark')
+          document.documentElement.style.colorScheme = theme
+
+          let meta = document.querySelector('meta[name="theme-color"]')
+          if (!meta) {
+            meta = document.createElement('meta')
+            meta.name = 'theme-color'
+            document.head.append(meta)
+          }
+          meta.content = themeColor
+        } catch {
+          // Ignore. Browser may block storage access.
+        }
+      })()
+    </script>
     <title>syududu</title>
   </head>
   <body>

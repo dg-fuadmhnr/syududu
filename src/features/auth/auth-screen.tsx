@@ -6,7 +6,7 @@ import { useAuth, useSupabaseReady } from '@/features/auth/auth-context'
 
 export function AuthScreen() {
   const navigate = useNavigate()
-  const { session, signIn, signUp, error } = useAuth()
+  const { session, signIn, error } = useAuth()
   const supabaseReady = useSupabaseReady()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -19,17 +19,15 @@ export function AuthScreen() {
     }
   }, [navigate, session])
 
-  const submit = async (mode: 'signin' | 'signup') => {
+  const submit = async () => {
     setBusy(true)
     setMessage(null)
 
-    const result = mode === 'signin' ? await signIn(email, password) : await signUp(email, password)
+    const result = await signIn(email, password)
 
     setBusy(false)
     if (result) {
       setMessage(result)
-    } else if (mode === 'signup') {
-      setMessage('Check email for confirmation link.')
     } else {
       navigate('/', { replace: true })
     }
@@ -61,19 +59,9 @@ export function AuthScreen() {
             value={password}
             onChange={(event) => setPassword(event.target.value)}
           />
-          <div className="grid grid-cols-2 gap-2">
-            <Button className="h-11 rounded-xl" disabled={busy || !supabaseReady} onClick={() => void submit('signin')}>
-              Sign in
-            </Button>
-            <Button
-              variant="outline"
-              className="h-11 rounded-xl"
-              disabled={busy || !supabaseReady}
-              onClick={() => void submit('signup')}
-            >
-              Sign up
-            </Button>
-          </div>
+          <Button className="h-11 rounded-xl" disabled={busy || !supabaseReady} onClick={() => void submit()}>
+            Sign in
+          </Button>
           {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
         </div>
