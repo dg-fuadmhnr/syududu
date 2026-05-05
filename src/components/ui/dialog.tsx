@@ -42,6 +42,11 @@ function DialogContent({
   const { open, setOpen } = useDialog()
   const contentRef = React.useRef<HTMLDivElement | null>(null)
   const lastActiveElement = React.useRef<HTMLElement | null>(null)
+  const setOpenRef = React.useRef(setOpen)
+
+  React.useEffect(() => {
+    setOpenRef.current = setOpen
+  }, [setOpen])
 
   React.useEffect(() => {
     if (!open) return
@@ -52,7 +57,7 @@ function DialogContent({
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setOpen(false)
+        setOpenRef.current(false)
       }
     }
 
@@ -70,14 +75,14 @@ function DialogContent({
       window.removeEventListener('keydown', handleKeyDown)
       lastActiveElement.current?.focus?.()
     }
-  }, [open, setOpen])
+  }, [open])
 
   if (!open || typeof document === 'undefined') return null
 
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-[2px]"
-      onMouseDown={() => setOpen(false)}
+      onMouseDown={() => setOpenRef.current(false)}
     >
       <div
         ref={contentRef}
@@ -92,7 +97,7 @@ function DialogContent({
         <button
           type="button"
           className="absolute right-4 top-4 rounded-md px-2 py-1 text-muted-foreground transition hover:bg-muted hover:text-foreground"
-          onClick={() => setOpen(false)}
+          onClick={() => setOpenRef.current(false)}
           aria-label="Close dialog"
         >
           ×
