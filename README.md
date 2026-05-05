@@ -26,6 +26,7 @@ Personal quick-capture note app with chat-like UI, offline-first storage, Supaba
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_PUBLISHABLE_KEY`
 4. Create Supabase tables and RLS policies from SQL in this README.
+   - If `note_attachments` is missing in an existing Supabase project, note text still works, but image sync stays disabled until that migration is applied.
 5. Run app.
    ```bash
    npm run dev

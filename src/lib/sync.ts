@@ -34,6 +34,25 @@ type RemoteNoteAttachment = {
   deleted_at: string | null
 }
 
+let noteAttachmentsTableAvailable: boolean | null = null
+
+function isMissingTableError(error: unknown) {
+  if (!error || typeof error !== 'object') return false
+
+  const value = error as {
+    code?: string
+    status?: number
+    message?: string
+    details?: string
+  }
+
+  return (
+    value.code === '42P01' ||
+    value.status === 404 ||
+    /note_attachments/i.test(`${value.message ?? ''} ${value.details ?? ''}`)
+  )
+}
+
 function toLocalGroup(row: RemoteGroup): LocalGroup {
   return {
     id: row.id,
@@ -135,6 +154,8 @@ async function pushNotes(userId: string) {
 }
 
 async function pushAttachments(userId: string) {
+  if (noteAttachmentsTableAvailable === false) return
+
   const pendingAttachments = await db.noteAttachments.where('userId').equals(userId).toArray()
 
   const upserts = pendingAttachments.filter((attachment) => attachment.syncState !== 'synced' && !attachment.deletedAt)
@@ -158,7 +179,15 @@ async function pushAttachments(userId: string) {
         })),
       )
 
-    if (error) throw error
+    if (error) {
+      if (isMissingTableError(error)) {
+        noteAttachmentsTableAvailable = false
+        console.warn('Supabase note_attachments table missing; attachment sync disabled until schema is added')
+        return
+      }
+
+      throw error
+    }
   }
 
   for (const attachment of deletions) {
@@ -167,7 +196,15 @@ async function pushAttachments(userId: string) {
       .delete()
       .eq('id', attachment.id)
       .eq('user_id', userId)
-    if (error) throw error
+    if (error) {
+      if (isMissingTableError(error)) {
+        noteAttachmentsTableAvailable = false
+        console.warn('Supabase note_attachments table missing; attachment sync disabled until schema is added')
+        return
+      }
+
+      throw error
+    }
   }
 }
 
@@ -222,12 +259,22 @@ async function pullNotes(userId: string) {
 }
 
 async function pullAttachments(userId: string) {
+  if (noteAttachmentsTableAvailable === false) return
+
   const { data, error } = await supabase!
     .from('note_attachments')
     .select('id,user_id,note_id,name,mime_type,data_url,sort_order,created_at,updated_at,deleted_at')
     .eq('user_id', userId)
 
-  if (error) throw error
+  if (error) {
+    if (isMissingTableError(error)) {
+      noteAttachmentsTableAvailable = false
+      console.warn('Supabase note_attachments table missing; attachment sync disabled until schema is added')
+      return
+    }
+
+    throw error
+  }
 
   const remoteAttachments = (data ?? []) as RemoteNoteAttachment[]
   const remoteIds = new Set(remoteAttachments.map((row) => row.id))
@@ -274,12 +321,14 @@ export async function syncWithSupabase(session: Session | null) {
       syncState: 'synced',
     })),
   )
-  await db.noteAttachments.bulkPut(
-    localAttachments.map((attachment) => ({
-      ...attachment,
-      syncState: 'synced',
-    })),
-  )
+  if (noteAttachmentsTableAvailable !== false) {
+    await db.noteAttachments.bulkPut(
+      localAttachments.map((attachment) => ({
+        ...attachment,
+        syncState: 'synced',
+      })),
+    )
+  }
 
   const deletedGroups = await db.groups.where('userId').equals(userId).and((group) => group.deletedAt !== null).toArray()
   const deletedNotes = await db.notes.where('userId').equals(userId).and((note) => note.deletedAt !== null).toArray()
