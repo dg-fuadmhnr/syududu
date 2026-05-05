@@ -14,6 +14,7 @@ type AppStoreValue = {
   renameGroup: (groupId: string, name: string) => Promise<void>
   deleteGroup: (groupId: string) => Promise<void>
   createNote: (content: string) => Promise<void>
+  editNote: (noteId: string, content: string) => Promise<void>
   deleteNote: (noteId: string) => Promise<void>
 }
 
@@ -279,6 +280,19 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     setSyncTick((value) => value + 1)
   }
 
+  const editNote = async (noteId: string, content: string) => {
+    const trimmed = content.trim()
+    if (!trimmed) return
+
+    await db.notes.update(noteId, {
+      content: trimmed,
+      updatedAt: nowIso(),
+      syncState: 'pending',
+    })
+    await refresh()
+    setSyncTick((value) => value + 1)
+  }
+
   const deleteNote = async (noteId: string) => {
     await db.notes.update(noteId, {
       deletedAt: nowIso(),
@@ -301,6 +315,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         renameGroup,
         deleteGroup,
         createNote,
+        editNote,
         deleteNote,
       }}
     >
