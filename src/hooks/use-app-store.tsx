@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 import { db, type LocalGroup, type LocalNote } from '@/lib/db'
 import { useAuth } from '@/features/auth/auth-context'
 
@@ -20,9 +20,22 @@ type AppStoreValue = {
 const AppStoreContext = createContext<AppStoreValue | null>(null)
 
 const GROUP_KEY = 'syududu.selected-group-id'
+const DEFAULT_GROUP_NAME = 'Personal'
 
 function nowIso() {
   return new Date().toISOString()
+}
+
+function getOwnerId(session: { user: { id: string } } | null) {
+  return session?.user.id ?? 'local'
+}
+
+function getSelectedGroupKey(ownerId: string) {
+  return `${GROUP_KEY}:${ownerId}`
+}
+
+function getDefaultGroupId(ownerId: string) {
+  return `syududu.default-group:${ownerId}`
 }
 
 function sortNewestLast<T extends { createdAt: string }>(items: T[]) {
@@ -41,32 +54,66 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     let active = true
 
     const load = async () => {
-      const existingGroups = sortNewestLast((await db.groups.toArray()).filter((group) => group.deletedAt === null))
+      const ownerId = getOwnerId(session)
+      let changed = false
+
+      if (session) {
+        const [localGroups, localNotes] = await Promise.all([
+          db.groups.where('userId').equals('local').toArray(),
+          db.notes.where('userId').equals('local').toArray(),
+        ])
+
+        if (localGroups.length > 0 || localNotes.length > 0) {
+          await db.transaction('rw', db.groups, db.notes, async () => {
+            for (const group of localGroups) {
+              await db.groups.update(group.id, {
+                userId: ownerId,
+                syncState: 'pending',
+                updatedAt: nowIso(),
+              })
+            }
+            for (const note of localNotes) {
+              await db.notes.update(note.id, {
+                userId: ownerId,
+                syncState: 'pending',
+                updatedAt: nowIso(),
+              })
+            }
+          })
+          changed = true
+        }
+      }
+
+      const existingGroups = sortNewestLast(
+        (await db.groups.where('userId').equals(ownerId).toArray()).filter((group) => group.deletedAt === null),
+      )
+
+      const existingNotes = sortNewestLast(
+        (await db.notes.where('userId').equals(ownerId).toArray()).filter((note) => note.deletedAt === null),
+      )
 
       if (existingGroups.length === 0) {
         const seedGroup: LocalGroup = {
-          id: crypto.randomUUID(),
-          userId: session?.user.id ?? 'local',
-          name: 'Personal',
+          id: getDefaultGroupId(ownerId),
+          userId: ownerId,
+          name: DEFAULT_GROUP_NAME,
           createdAt: nowIso(),
           updatedAt: nowIso(),
           deletedAt: null,
           syncState: 'pending',
         }
 
-        await db.groups.add(seedGroup)
+        await db.groups.put(seedGroup)
+        changed = true
         if (!active) return
-        setGroups([seedGroup])
-        setSelectedGroupIdState(seedGroup.id)
-        return
+        existingGroups.push(seedGroup)
+        existingGroups.sort((left, right) => left.createdAt.localeCompare(right.createdAt))
       }
 
-      const selectedFromStorage = localStorage.getItem(GROUP_KEY)
+      const selectedFromStorage = localStorage.getItem(getSelectedGroupKey(ownerId)) ?? localStorage.getItem(GROUP_KEY)
       const selectedId = selectedFromStorage && existingGroups.some((group) => group.id === selectedFromStorage)
         ? selectedFromStorage
         : existingGroups[0]?.id ?? null
-
-      const existingNotes = sortNewestLast((await db.notes.toArray()).filter((note) => note.deletedAt === null))
 
       if (!active) return
       setGroups(existingGroups)
@@ -74,7 +121,11 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       setSelectedGroupIdState(selectedId)
 
       if (selectedId) {
-        localStorage.setItem(GROUP_KEY, selectedId)
+        localStorage.setItem(getSelectedGroupKey(ownerId), selectedId)
+      }
+
+      if (changed) {
+        setSyncTick((value) => value + 1)
       }
     }
 
@@ -83,51 +134,19 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     return () => {
       active = false
     }
-  }, [session?.user.id])
-
-  useEffect(() => {
-    if (!session) return
-
-    const userId = session.user.id
-
-    const migrateLocalRows = async () => {
-      const [localGroups, localNotes] = await Promise.all([
-        db.groups.where('userId').equals('local').toArray(),
-        db.notes.where('userId').equals('local').toArray(),
-      ])
-
-      if (localGroups.length === 0 && localNotes.length === 0) {
-        return
-      }
-
-      await db.transaction('rw', db.groups, db.notes, async () => {
-        for (const group of localGroups) {
-          await db.groups.update(group.id, {
-            userId,
-            syncState: 'pending',
-            updatedAt: nowIso(),
-          })
-        }
-        for (const note of localNotes) {
-          await db.notes.update(note.id, {
-            userId,
-            syncState: 'pending',
-            updatedAt: nowIso(),
-          })
-        }
-      })
-    }
-
-    void migrateLocalRows()
   }, [session])
 
-  async function refresh() {
-    const [allGroups, allNotes] = await Promise.all([db.groups.toArray(), db.notes.toArray()])
+  const refresh = useCallback(async () => {
+    const ownerId = getOwnerId(session)
+    const [allGroups, allNotes] = await Promise.all([
+      db.groups.where('userId').equals(ownerId).toArray(),
+      db.notes.where('userId').equals(ownerId).toArray(),
+    ])
     const nextGroups = allGroups.filter((group) => group.deletedAt === null)
     const nextNotes = allNotes.filter((note) => note.deletedAt === null)
     setGroups(sortNewestLast(nextGroups))
     setNotes(sortNewestLast(nextNotes))
-  }
+  }, [session])
 
   useEffect(() => {
     if (!session || !navigator.onLine) return
@@ -150,7 +169,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [session, syncTick])
+  }, [refresh, session, syncTick])
 
   useEffect(() => {
     const handleOnline = () => {
@@ -165,16 +184,17 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const setSelectedGroupId = (groupId: string) => {
     setSelectedGroupIdState(groupId)
-    localStorage.setItem(GROUP_KEY, groupId)
+    localStorage.setItem(getSelectedGroupKey(getOwnerId(session)), groupId)
   }
 
   const createGroup = async (name: string) => {
     const trimmed = name.trim()
     if (!trimmed) return
 
+    const ownerId = getOwnerId(session)
     const nextGroup: LocalGroup = {
       id: crypto.randomUUID(),
-      userId: session?.user.id ?? 'local',
+      userId: ownerId,
       name: trimmed,
       createdAt: nowIso(),
       updatedAt: nowIso(),
@@ -213,17 +233,24 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       })
     })
 
-    const nextGroups = sortNewestLast((await db.groups.toArray()).filter((group) => group.deletedAt === null))
+    const ownerId = getOwnerId(session)
+    const nextGroups = sortNewestLast(
+      (await db.groups.where('userId').equals(ownerId).toArray()).filter((group) => group.deletedAt === null),
+    )
     const fallbackGroupId = nextGroups[0]?.id ?? null
 
     setGroups(nextGroups)
-    setNotes(sortNewestLast((await db.notes.toArray()).filter((note) => note.deletedAt === null)))
+    setNotes(
+      sortNewestLast(
+        (await db.notes.where('userId').equals(ownerId).toArray()).filter((note) => note.deletedAt === null),
+      ),
+    )
     setSelectedGroupIdState(fallbackGroupId)
 
     if (fallbackGroupId) {
-      localStorage.setItem(GROUP_KEY, fallbackGroupId)
+      localStorage.setItem(getSelectedGroupKey(ownerId), fallbackGroupId)
     } else {
-      localStorage.removeItem(GROUP_KEY)
+      localStorage.removeItem(getSelectedGroupKey(ownerId))
     }
     setSyncTick((value) => value + 1)
   }
@@ -232,12 +259,13 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     const trimmed = content.trim()
     if (!trimmed) return
 
+    const ownerId = getOwnerId(session)
     const targetGroupId = selectedGroupId ?? groups[0]?.id
     if (!targetGroupId) return
 
     const nextNote: LocalNote = {
       id: crypto.randomUUID(),
-      userId: session?.user.id ?? 'local',
+      userId: ownerId,
       groupId: targetGroupId,
       content: trimmed,
       createdAt: nowIso(),

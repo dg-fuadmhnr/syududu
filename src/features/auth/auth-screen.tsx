@@ -46,7 +46,13 @@ export function AuthScreen() {
             : 'Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY first.'}
         </p>
 
-        <div className="mt-6 grid gap-3">
+        <form
+          className="mt-6 grid gap-3"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void submit()
+          }}
+        >
           <Input
             type="email"
             placeholder="Email"
@@ -59,12 +65,12 @@ export function AuthScreen() {
             value={password}
             onChange={(event) => setPassword(event.target.value)}
           />
-          <Button className="h-11 rounded-xl" disabled={busy || !supabaseReady} onClick={() => void submit()}>
+          <Button className="h-11 rounded-xl" disabled={busy || !supabaseReady} type="submit">
             Sign in
           </Button>
           {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
-        </div>
+        </form>
       </div>
     </div>
   )

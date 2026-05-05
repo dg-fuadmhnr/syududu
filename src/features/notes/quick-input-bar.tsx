@@ -31,7 +31,7 @@ export function QuickInputBar() {
               void save()
             }
           }}
-          className="min-h-28 w-full resize-y rounded-2xl border border-input bg-background px-4 py-3 text-sm leading-6 outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20"
+          className="min-h-28 w-full resize-y rounded-2xl border border-input bg-background px-4 py-3 text-base leading-6 outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20 sm:text-sm"
         />
         <Button className="h-12 w-full rounded-2xl px-5 md:w-auto md:self-end" disabled={saving || !content.trim()} onClick={() => void save()}>
           <RiSave3Line />
