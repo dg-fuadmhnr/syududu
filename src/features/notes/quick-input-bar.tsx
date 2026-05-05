@@ -3,11 +3,13 @@ import { RiCloseLine, RiImageAddLine, RiSave3Line } from '@remixicon/react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useAppStore } from '@/hooks/use-app-store'
+import type { NoteAttachmentInput } from '@/lib/note-attachments'
 
 type DraftImage = {
   id: string
   name: string
   src: string
+  mimeType: string
 }
 
 function readFileAsDataUrl(file: File) {
@@ -51,14 +53,6 @@ async function compressImage(file: File) {
   return canvas.toDataURL('image/jpeg', 0.86)
 }
 
-function composeMarkdown(content: string, images: DraftImage[]) {
-  const body = content.trim()
-  const imageMarkdown = images.map((image) => `![${image.name}](${image.src})`).join('\n\n')
-
-  if (body && imageMarkdown) return `${body}\n\n${imageMarkdown}`
-  return body || imageMarkdown
-}
-
 export function QuickInputBar() {
   const { createNote } = useAppStore()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -69,15 +63,22 @@ export function QuickInputBar() {
   const [error, setError] = useState<string | null>(null)
 
   const save = async () => {
-    const payload = composeMarkdown(content, images)
-    if (!payload.trim()) return
+  if (!content.trim() && images.length === 0) return
 
-    setSaving(true)
-    setError(null)
-    await createNote(payload)
-    setContent('')
-    setImages([])
-    setSaving(false)
+  setSaving(true)
+  setError(null)
+  await createNote(
+    content,
+    images.map<NoteAttachmentInput>((image, index) => ({
+      name: image.name,
+      mimeType: image.mimeType,
+      dataUrl: image.src,
+      sortOrder: index,
+    })),
+  )
+  setContent('')
+  setImages([])
+  setSaving(false)
   }
 
   const addFiles = async (files: FileList | File[]) => {
@@ -93,6 +94,7 @@ export function QuickInputBar() {
           id: crypto.randomUUID(),
           name: file.name || 'image',
           src: file.type === 'image/svg+xml' ? await readFileAsDataUrl(file) : await compressImage(file),
+          mimeType: file.type,
         })),
       )
       setImages((current) => [...current, ...nextImages])
@@ -203,7 +205,7 @@ export function QuickInputBar() {
           </Button>
           <Button
             className="h-12 w-full rounded-2xl px-5 md:w-auto"
-            disabled={saving || readingImages || !composeMarkdown(content, images).trim()}
+            disabled={saving || readingImages || (!content.trim() && images.length === 0)}
             onClick={() => void save()}
           >
             <RiSave3Line />

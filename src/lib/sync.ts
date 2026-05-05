@@ -1,5 +1,5 @@
 import type { Session } from '@supabase/supabase-js'
-import { db, type LocalGroup, type LocalNote } from '@/lib/db'
+import { db, type LocalGroup, type LocalNote, type LocalNoteAttachment } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 
 type RemoteGroup = {
@@ -16,6 +16,19 @@ type RemoteNote = {
   user_id: string
   group_id: string
   content: string
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+}
+
+type RemoteNoteAttachment = {
+  id: string
+  user_id: string
+  note_id: string
+  name: string
+  mime_type: string
+  data_url: string
+  sort_order: number
   created_at: string
   updated_at: string
   deleted_at: string | null
@@ -39,6 +52,22 @@ function toLocalNote(row: RemoteNote): LocalNote {
     userId: row.user_id,
     groupId: row.group_id,
     content: row.content,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    deletedAt: row.deleted_at,
+    syncState: 'synced',
+  }
+}
+
+function toLocalAttachment(row: RemoteNoteAttachment): LocalNoteAttachment {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    noteId: row.note_id,
+    name: row.name,
+    mimeType: row.mime_type,
+    dataUrl: row.data_url,
+    sortOrder: row.sort_order,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     deletedAt: row.deleted_at,
@@ -105,6 +134,43 @@ async function pushNotes(userId: string) {
   }
 }
 
+async function pushAttachments(userId: string) {
+  const pendingAttachments = await db.noteAttachments.where('userId').equals(userId).toArray()
+
+  const upserts = pendingAttachments.filter((attachment) => attachment.syncState !== 'synced' && !attachment.deletedAt)
+  const deletions = pendingAttachments.filter((attachment) => attachment.deletedAt)
+
+  if (upserts.length > 0) {
+    const { error } = await supabase!
+      .from('note_attachments')
+      .upsert(
+        upserts.map((attachment) => ({
+          id: attachment.id,
+          user_id: attachment.userId,
+          note_id: attachment.noteId,
+          name: attachment.name,
+          mime_type: attachment.mimeType,
+          data_url: attachment.dataUrl,
+          sort_order: attachment.sortOrder,
+          created_at: attachment.createdAt,
+          updated_at: attachment.updatedAt,
+          deleted_at: attachment.deletedAt,
+        })),
+      )
+
+    if (error) throw error
+  }
+
+  for (const attachment of deletions) {
+    const { error } = await supabase!
+      .from('note_attachments')
+      .delete()
+      .eq('id', attachment.id)
+      .eq('user_id', userId)
+    if (error) throw error
+  }
+}
+
 async function pullGroups(userId: string) {
   const { data, error } = await supabase!
     .from('groups')
@@ -155,6 +221,31 @@ async function pullNotes(userId: string) {
   })
 }
 
+async function pullAttachments(userId: string) {
+  const { data, error } = await supabase!
+    .from('note_attachments')
+    .select('id,user_id,note_id,name,mime_type,data_url,sort_order,created_at,updated_at,deleted_at')
+    .eq('user_id', userId)
+
+  if (error) throw error
+
+  const remoteAttachments = (data ?? []) as RemoteNoteAttachment[]
+  const remoteIds = new Set(remoteAttachments.map((row) => row.id))
+
+  await db.transaction('rw', db.noteAttachments, async () => {
+    for (const row of remoteAttachments) {
+      await db.noteAttachments.put(toLocalAttachment(row))
+    }
+
+    const localAttachments = await db.noteAttachments.where('userId').equals(userId).toArray()
+    for (const attachment of localAttachments) {
+      if (!remoteIds.has(attachment.id) && attachment.syncState === 'synced') {
+        await db.noteAttachments.delete(attachment.id)
+      }
+    }
+  })
+}
+
 export async function syncWithSupabase(session: Session | null) {
   if (!supabase || !session) return
 
@@ -162,32 +253,50 @@ export async function syncWithSupabase(session: Session | null) {
 
   await pushGroups(userId)
   await pushNotes(userId)
+  await pushAttachments(userId)
   await pullGroups(userId)
   await pullNotes(userId)
+  await pullAttachments(userId)
 
   const localGroups = await db.groups.where('userId').equals(userId).toArray()
   const localNotes = await db.notes.where('userId').equals(userId).toArray()
+  const localAttachments = await db.noteAttachments.where('userId').equals(userId).toArray()
 
   await db.groups.bulkPut(
     localGroups.map((group) => ({
       ...group,
-      syncState: group.deletedAt ? 'synced' : 'synced',
+      syncState: 'synced',
     })),
   )
   await db.notes.bulkPut(
     localNotes.map((note) => ({
       ...note,
-      syncState: note.deletedAt ? 'synced' : 'synced',
+      syncState: 'synced',
+    })),
+  )
+  await db.noteAttachments.bulkPut(
+    localAttachments.map((attachment) => ({
+      ...attachment,
+      syncState: 'synced',
     })),
   )
 
   const deletedGroups = await db.groups.where('userId').equals(userId).and((group) => group.deletedAt !== null).toArray()
   const deletedNotes = await db.notes.where('userId').equals(userId).and((note) => note.deletedAt !== null).toArray()
+  const deletedAttachments = await db
+    .noteAttachments
+    .where('userId')
+    .equals(userId)
+    .and((attachment) => attachment.deletedAt !== null)
+    .toArray()
 
   for (const group of deletedGroups) {
     await db.groups.delete(group.id)
   }
   for (const note of deletedNotes) {
     await db.notes.delete(note.id)
+  }
+  for (const attachment of deletedAttachments) {
+    await db.noteAttachments.delete(attachment.id)
   }
 }

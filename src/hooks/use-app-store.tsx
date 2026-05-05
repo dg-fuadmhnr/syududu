@@ -1,11 +1,18 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
-import { db, type LocalGroup, type LocalNote } from '@/lib/db'
+import { db, type LocalGroup, type LocalNote, type LocalNoteAttachment } from '@/lib/db'
 import { useAuth } from '@/features/auth/auth-context'
+import {
+  extractInlineImages,
+  mimeTypeFromDataUrl,
+  type DraftAttachment,
+  type NoteAttachmentInput,
+} from '@/lib/note-attachments'
 
 type AppStoreValue = {
   groups: LocalGroup[]
   notes: LocalNote[]
+  attachments: LocalNoteAttachment[]
   selectedGroupId: string | null
   searchQuery: string
   setSearchQuery: (value: string) => void
@@ -13,8 +20,8 @@ type AppStoreValue = {
   createGroup: (name: string) => Promise<void>
   renameGroup: (groupId: string, name: string) => Promise<void>
   deleteGroup: (groupId: string) => Promise<void>
-  createNote: (content: string) => Promise<void>
-  editNote: (noteId: string, content: string) => Promise<void>
+  createNote: (content: string, attachments?: NoteAttachmentInput[]) => Promise<void>
+  editNote: (noteId: string, content: string, attachments?: DraftAttachment[]) => Promise<void>
   deleteNote: (noteId: string) => Promise<void>
 }
 
@@ -47,6 +54,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const { session } = useAuth()
   const [groups, setGroups] = useState<LocalGroup[]>([])
   const [notes, setNotes] = useState<LocalNote[]>([])
+  const [attachments, setAttachments] = useState<LocalNoteAttachment[]>([])
   const [selectedGroupId, setSelectedGroupIdState] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [syncTick, setSyncTick] = useState(0)
@@ -91,13 +99,14 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       }
 
       if (session) {
-        const [localGroups, localNotes] = await Promise.all([
+        const [localGroups, localNotes, localAttachments] = await Promise.all([
           db.groups.where('userId').equals('local').toArray(),
           db.notes.where('userId').equals('local').toArray(),
+          db.noteAttachments.where('userId').equals('local').toArray(),
         ])
 
-        if (localGroups.length > 0 || localNotes.length > 0) {
-          await db.transaction('rw', db.groups, db.notes, async () => {
+        if (localGroups.length > 0 || localNotes.length > 0 || localAttachments.length > 0) {
+          await db.transaction('rw', db.groups, db.notes, db.noteAttachments, async () => {
             for (const group of localGroups) {
               await db.groups.update(group.id, {
                 userId: ownerId,
@@ -112,6 +121,13 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
                 updatedAt: nowIso(),
               })
             }
+            for (const attachment of localAttachments) {
+              await db.noteAttachments.update(attachment.id, {
+                userId: ownerId,
+                syncState: 'pending',
+                updatedAt: nowIso(),
+              })
+            }
           })
           changed = true
         }
@@ -121,9 +137,62 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         (await db.groups.where('userId').equals(ownerId).toArray()).filter((group) => group.deletedAt === null),
       )
 
-      const existingNotes = sortNewestLast(
+      let existingNotes = sortNewestLast(
         (await db.notes.where('userId').equals(ownerId).toArray()).filter((note) => note.deletedAt === null),
       )
+      let existingAttachments = sortNewestLast(
+        (await db.noteAttachments.where('userId').equals(ownerId).toArray()).filter(
+          (attachment) => attachment.deletedAt === null,
+        ),
+      )
+
+      const legacyInlineNotes = existingNotes.filter((note) => note.content.includes('!['))
+      if (legacyInlineNotes.length > 0) {
+        await db.transaction('rw', db.notes, db.noteAttachments, async () => {
+          for (const note of legacyInlineNotes) {
+            const { body, images } = extractInlineImages(note.content)
+            if (images.length === 0) continue
+
+            await db.notes.update(note.id, {
+              content: body,
+              updatedAt: nowIso(),
+              syncState: 'pending',
+            })
+
+            const noteAttachments = images.map<LocalNoteAttachment>((image, index) => ({
+              id: crypto.randomUUID(),
+              userId: ownerId,
+              noteId: note.id,
+              name: image.name,
+              mimeType: image.src.startsWith('data:image/png')
+                ? 'image/png'
+                : image.src.startsWith('data:image/jpeg') || image.src.startsWith('data:image/jpg')
+                  ? 'image/jpeg'
+                  : image.src.startsWith('data:image/webp')
+                    ? 'image/webp'
+                    : image.src.startsWith('data:image/svg+xml')
+                      ? 'image/svg+xml'
+                      : 'image/*',
+              dataUrl: image.src,
+              sortOrder: index,
+              createdAt: nowIso(),
+              updatedAt: nowIso(),
+              deletedAt: null,
+              syncState: 'pending',
+            }))
+
+            await db.noteAttachments.bulkAdd(noteAttachments)
+          }
+        })
+        existingNotes = sortNewestLast(
+          (await db.notes.where('userId').equals(ownerId).toArray()).filter((note) => note.deletedAt === null),
+        )
+        existingAttachments = sortNewestLast(
+          (await db.noteAttachments.where('userId').equals(ownerId).toArray()).filter(
+            (attachment) => attachment.deletedAt === null,
+          ),
+        )
+      }
 
       if (existingGroups.length === 0) {
         const seedGroup: LocalGroup = {
@@ -151,6 +220,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       if (!active) return
       setGroups(existingGroups)
       setNotes(existingNotes)
+      setAttachments(existingAttachments)
       setSelectedGroupIdState(selectedId)
 
       if (selectedId) {
@@ -171,14 +241,17 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     const ownerId = getOwnerId(session)
-    const [allGroups, allNotes] = await Promise.all([
+    const [allGroups, allNotes, allAttachments] = await Promise.all([
       db.groups.where('userId').equals(ownerId).toArray(),
       db.notes.where('userId').equals(ownerId).toArray(),
+      db.noteAttachments.where('userId').equals(ownerId).toArray(),
     ])
     const nextGroups = allGroups.filter((group) => group.deletedAt === null)
     const nextNotes = allNotes.filter((note) => note.deletedAt === null)
+    const nextAttachments = allAttachments.filter((attachment) => attachment.deletedAt === null)
     setGroups(sortNewestLast(nextGroups))
     setNotes(sortNewestLast(nextNotes))
+    setAttachments(sortNewestLast(nextAttachments))
   }, [session])
 
   useEffect(() => {
@@ -255,11 +328,19 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   }
 
   const deleteGroup = async (groupId: string) => {
-    await db.transaction('rw', db.groups, db.notes, async () => {
+    const noteIds = await db.notes.where('groupId').equals(groupId).primaryKeys()
+
+    await db.transaction('rw', db.groups, db.notes, db.noteAttachments, async () => {
       await db.notes.where('groupId').equals(groupId).modify({
         deletedAt: nowIso(),
         syncState: 'pending',
       })
+      for (const noteId of noteIds) {
+        await db.noteAttachments.where('noteId').equals(String(noteId)).modify({
+          deletedAt: nowIso(),
+          syncState: 'pending',
+        })
+      }
       await db.groups.update(groupId, {
         deletedAt: nowIso(),
         syncState: 'pending',
@@ -288,47 +369,109 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     setSyncTick((value) => value + 1)
   }
 
-  const createNote = async (content: string) => {
+  const createNoteWithAttachments = async (content: string, attachments: NoteAttachmentInput[] = []) => {
     const trimmed = content.trim()
-    if (!trimmed) return
-
     const ownerId = getOwnerId(session)
     const targetGroupId = selectedGroupId ?? groups[0]?.id
     if (!targetGroupId) return
+    if (!trimmed && attachments.length === 0) return
 
-    const nextNote: LocalNote = {
-      id: crypto.randomUUID(),
-      userId: ownerId,
-      groupId: targetGroupId,
-      content: trimmed,
-      createdAt: nowIso(),
-      updatedAt: nowIso(),
-      deletedAt: null,
-      syncState: 'pending',
-    }
+    const noteId = crypto.randomUUID()
+    const now = nowIso()
 
-    await db.notes.add(nextNote)
+    await db.transaction('rw', db.notes, db.noteAttachments, async () => {
+      await db.notes.add({
+        id: noteId,
+        userId: ownerId,
+        groupId: targetGroupId,
+        content: trimmed,
+        createdAt: now,
+        updatedAt: now,
+        deletedAt: null,
+        syncState: 'pending',
+      })
+
+      if (attachments.length > 0) {
+        await db.noteAttachments.bulkAdd(
+          attachments.map((attachment) => ({
+            id: crypto.randomUUID(),
+            userId: ownerId,
+            noteId,
+            name: attachment.name,
+            mimeType: attachment.mimeType,
+            dataUrl: attachment.dataUrl,
+            sortOrder: attachment.sortOrder,
+            createdAt: now,
+            updatedAt: now,
+            deletedAt: null,
+            syncState: 'pending',
+          })),
+        )
+      }
+    })
+
     await refresh()
     setSyncTick((value) => value + 1)
   }
 
-  const editNote = async (noteId: string, content: string) => {
+  const editNote = async (noteId: string, content: string, attachments: DraftAttachment[] = []) => {
     const trimmed = content.trim()
-    if (!trimmed) return
+    if (!trimmed && attachments.length === 0) return
 
-    await db.notes.update(noteId, {
-      content: trimmed,
-      updatedAt: nowIso(),
-      syncState: 'pending',
+    const now = nowIso()
+    await db.transaction('rw', db.notes, db.noteAttachments, async () => {
+      await db.notes.update(noteId, {
+        content: trimmed,
+        updatedAt: now,
+        syncState: 'pending',
+      })
+
+      const existingAttachments = await db.noteAttachments.where('noteId').equals(noteId).toArray()
+      const existingById = new Map(existingAttachments.map((attachment) => [attachment.id, attachment]))
+      const incomingIds = new Set(attachments.map((attachment) => attachment.id))
+
+      for (const existing of existingAttachments) {
+        if (!incomingIds.has(existing.id)) {
+          await db.noteAttachments.update(existing.id, {
+            deletedAt: now,
+            syncState: 'pending',
+          })
+        }
+      }
+
+      for (const [index, attachment] of attachments.entries()) {
+        const existing = existingById.get(attachment.id)
+        const nextAttachment = {
+          id: attachment.id,
+          userId: existing?.userId ?? getOwnerId(session),
+          noteId,
+          name: attachment.name,
+          mimeType: attachment.mimeType || mimeTypeFromDataUrl(attachment.dataUrl),
+          dataUrl: attachment.dataUrl,
+          sortOrder: index,
+          createdAt: existing?.createdAt ?? now,
+          updatedAt: now,
+          deletedAt: null,
+          syncState: 'pending' as const,
+        }
+
+        await db.noteAttachments.put(nextAttachment)
+      }
     })
     await refresh()
     setSyncTick((value) => value + 1)
   }
 
   const deleteNote = async (noteId: string) => {
-    await db.notes.update(noteId, {
-      deletedAt: nowIso(),
-      syncState: 'pending',
+    await db.transaction('rw', db.notes, db.noteAttachments, async () => {
+      await db.notes.update(noteId, {
+        deletedAt: nowIso(),
+        syncState: 'pending',
+      })
+      await db.noteAttachments.where('noteId').equals(noteId).modify({
+        deletedAt: nowIso(),
+        syncState: 'pending',
+      })
     })
     await refresh()
     setSyncTick((value) => value + 1)
@@ -339,6 +482,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       value={{
         groups,
         notes,
+        attachments,
         selectedGroupId,
         searchQuery,
         setSearchQuery,
@@ -346,7 +490,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         createGroup,
         renameGroup,
         deleteGroup,
-        createNote,
+        createNote: createNoteWithAttachments,
         editNote,
         deleteNote,
       }}
