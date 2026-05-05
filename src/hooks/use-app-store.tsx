@@ -30,7 +30,6 @@ type AppStoreValue = {
 const AppStoreContext = createContext<AppStoreValue | null>(null)
 
 const GROUP_KEY = 'syududu.selected-group-id'
-const DEFAULT_GROUP_NAME = 'Sample Groups'
 
 function nowIso() {
   return new Date().toISOString()
@@ -198,24 +197,6 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         )
       }
 
-      if (existingGroups.length === 0) {
-        const seedGroup: LocalGroup = {
-          id: crypto.randomUUID(),
-          userId: ownerId,
-          name: DEFAULT_GROUP_NAME,
-          createdAt: nowIso(),
-          updatedAt: nowIso(),
-          deletedAt: null,
-          syncState: 'pending',
-        }
-
-        await db.groups.put(seedGroup)
-        changed = true
-        if (!active) return
-        existingGroups.push(seedGroup)
-        existingGroups.sort((left, right) => left.createdAt.localeCompare(right.createdAt))
-      }
-
       const selectedFromStorage = localStorage.getItem(getSelectedGroupKey(ownerId)) ?? localStorage.getItem(GROUP_KEY)
       const selectedId = selectedFromStorage && existingGroups.some((group) => group.id === selectedFromStorage)
         ? selectedFromStorage
@@ -229,6 +210,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
       if (selectedId) {
         localStorage.setItem(getSelectedGroupKey(ownerId), selectedId)
+      } else {
+        localStorage.removeItem(getSelectedGroupKey(ownerId))
       }
 
       if (changed) {
