@@ -23,6 +23,7 @@ type AppStoreValue = {
   createNote: (content: string, attachments?: NoteAttachmentInput[]) => Promise<void>
   editNote: (noteId: string, content: string, attachments?: DraftAttachment[]) => Promise<void>
   deleteNote: (noteId: string) => Promise<void>
+  syncNow: () => Promise<void>
 }
 
 const AppStoreContext = createContext<AppStoreValue | null>(null)
@@ -254,6 +255,14 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     setAttachments(sortNewestLast(nextAttachments))
   }, [session])
 
+  const syncNow = useCallback(async () => {
+    if (!session || !navigator.onLine) return
+
+    const { syncWithSupabase } = await import('@/lib/sync')
+    await syncWithSupabase(session)
+    await refresh()
+  }, [refresh, session])
+
   useEffect(() => {
     if (!session || !navigator.onLine) return
 
@@ -261,10 +270,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
     const runSync = async () => {
       try {
-        const { syncWithSupabase } = await import('@/lib/sync')
-        await syncWithSupabase(session)
+        await syncNow()
         if (cancelled) return
-        await refresh()
       } catch (error) {
         console.error('Supabase sync failed', error)
       }
@@ -275,7 +282,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [refresh, session, syncTick])
+  }, [session, syncNow, syncTick])
 
   useEffect(() => {
     const handleOnline = () => {
@@ -287,6 +294,29 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('online', handleOnline)
     }
   }, [])
+
+  useEffect(() => {
+    if (!session) return
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        setSyncTick((value) => value + 1)
+      }
+    }
+
+    const interval = window.setInterval(() => {
+      if (navigator.onLine) {
+        setSyncTick((value) => value + 1)
+      }
+    }, 30000)
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      window.clearInterval(interval)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [session])
 
   const setSelectedGroupId = (groupId: string) => {
     setSelectedGroupIdState(groupId)
@@ -493,6 +523,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         createNote: createNoteWithAttachments,
         editNote,
         deleteNote,
+        syncNow,
       }}
     >
       {children}

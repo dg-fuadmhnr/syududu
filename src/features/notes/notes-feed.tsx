@@ -210,6 +210,7 @@ function NoteEditDialog({
         </DialogHeader>
         <div className="grid gap-3">
           <Textarea
+            data-autofocus
             value={body}
             onChange={(event) => setBody(event.target.value)}
             className="min-h-48 text-base leading-6 sm:text-sm"

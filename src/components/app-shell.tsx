@@ -4,6 +4,7 @@ import {
   RiInformationLine,
   RiMenuLine,
   RiMoonLine,
+  RiRefreshLine,
   RiSunLine,
   RiLogoutBoxRLine,
 } from '@remixicon/react'
@@ -25,7 +26,7 @@ import { useTheme } from '@/hooks/use-theme'
 
 export function AppShell() {
   const { session, loading, signOut } = useAuth()
-  const { searchQuery, setSearchQuery } = useAppStore()
+  const { searchQuery, setSearchQuery, syncNow } = useAppStore()
   const { theme, toggleTheme } = useTheme()
   const [groupsOpen, setGroupsOpen] = useState(false)
   const [infoOpen, setInfoOpen] = useState(false)
@@ -69,6 +70,10 @@ export function AppShell() {
               onChange={(event) => setSearchQuery(event.target.value)}
             />
             <div className="flex items-center gap-2">
+              <Button variant="outline" className="h-10" onClick={() => void syncNow()}>
+                <RiRefreshLine />
+                <span>Sync</span>
+              </Button>
               <Button
                 variant="outline"
                 size="icon-sm"
