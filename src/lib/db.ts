@@ -17,6 +17,18 @@ export type LocalNote = {
   userId: string
   groupId: string
   content: string
+  pinnedAt: string | null
+  createdAt: string
+  updatedAt: string
+  deletedAt: string | null
+  syncState: SyncState
+}
+
+export type LocalNoteTag = {
+  id: string
+  userId: string
+  noteId: string
+  name: string
   createdAt: string
   updatedAt: string
   deletedAt: string | null
@@ -41,6 +53,7 @@ export class SyududuDB extends Dexie {
   groups!: Table<LocalGroup, string>
   notes!: Table<LocalNote, string>
   noteAttachments!: Table<LocalNoteAttachment, string>
+  noteTags!: Table<LocalNoteTag, string>
 
   constructor() {
     super('syududu')
@@ -61,6 +74,22 @@ export class SyududuDB extends Dexie {
       noteAttachments:
         'id, userId, noteId, sortOrder, createdAt, updatedAt, deletedAt, syncState, mimeType, name',
     })
+
+    this.version(4)
+      .stores({
+        groups: 'id, userId, name, createdAt, updatedAt, deletedAt, syncState',
+        notes: 'id, userId, groupId, pinnedAt, createdAt, updatedAt, deletedAt, syncState, content',
+        noteAttachments:
+          'id, userId, noteId, sortOrder, createdAt, updatedAt, deletedAt, syncState, mimeType, name',
+        noteTags: 'id, userId, noteId, name, createdAt, updatedAt, deletedAt, syncState',
+      })
+      .upgrade(async (tx) => {
+        await tx.table('notes').toCollection().modify((note: Partial<LocalNote>) => {
+          if (note.pinnedAt === undefined) {
+            note.pinnedAt = null
+          }
+        })
+      })
   }
 }
 

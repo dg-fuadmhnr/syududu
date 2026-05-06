@@ -1,5 +1,5 @@
 import type { Session } from '@supabase/supabase-js'
-import { db, type LocalGroup, type LocalNote, type LocalNoteAttachment } from '@/lib/db'
+import { db, type LocalGroup, type LocalNote, type LocalNoteAttachment, type LocalNoteTag } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 
 type RemoteGroup = {
@@ -16,6 +16,17 @@ type RemoteNote = {
   user_id: string
   group_id: string
   content: string
+  pinned_at: string | null
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+}
+
+type RemoteNoteTag = {
+  id: string
+  user_id: string
+  note_id: string
+  name: string
   created_at: string
   updated_at: string
   deleted_at: string | null
@@ -35,6 +46,8 @@ type RemoteNoteAttachment = {
 }
 
 let noteAttachmentsTableAvailable: boolean | null = null
+let noteTagsTableAvailable: boolean | null = null
+let notePinnedColumnAvailable: boolean | null = null
 
 function isMissingTableError(error: unknown) {
   if (!error || typeof error !== 'object') return false
@@ -49,8 +62,21 @@ function isMissingTableError(error: unknown) {
   return (
     value.code === '42P01' ||
     value.status === 404 ||
-    /note_attachments/i.test(`${value.message ?? ''} ${value.details ?? ''}`)
+    /note_attachments/i.test(`${value.message ?? ''} ${value.details ?? ''}`) ||
+    /note_tags/i.test(`${value.message ?? ''} ${value.details ?? ''}`)
   )
+}
+
+function isMissingColumnError(error: unknown, columnName: string) {
+  if (!error || typeof error !== 'object') return false
+
+  const value = error as {
+    code?: string
+    message?: string
+    details?: string
+  }
+
+  return value.code === '42703' || new RegExp(columnName, 'i').test(`${value.message ?? ''} ${value.details ?? ''}`)
 }
 
 function toLocalGroup(row: RemoteGroup): LocalGroup {
@@ -71,6 +97,20 @@ function toLocalNote(row: RemoteNote): LocalNote {
     userId: row.user_id,
     groupId: row.group_id,
     content: row.content,
+    pinnedAt: row.pinned_at ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    deletedAt: row.deleted_at,
+    syncState: 'synced',
+  }
+}
+
+function toLocalTag(row: RemoteNoteTag): LocalNoteTag {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    noteId: row.note_id,
+    name: row.name,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     deletedAt: row.deleted_at,
@@ -130,10 +170,24 @@ async function pushNotes(userId: string) {
   const deletions = pendingNotes.filter((note) => note.deletedAt)
 
   if (upserts.length > 0) {
-    const { error } = await supabase!
-      .from('notes')
-      .upsert(
-        upserts.map((note) => ({
+    const includePinnedColumn = notePinnedColumnAvailable !== false
+    const rows = upserts.map((note) => ({
+      id: note.id,
+      user_id: note.userId,
+      group_id: note.groupId,
+      content: note.content,
+      ...(includePinnedColumn ? { pinned_at: note.pinnedAt } : {}),
+      created_at: note.createdAt,
+      updated_at: note.updatedAt,
+      deleted_at: note.deletedAt,
+    }))
+
+    const { error } = await supabase!.from('notes').upsert(rows)
+
+    if (error) {
+      if (includePinnedColumn && isMissingColumnError(error, 'pinned_at')) {
+        notePinnedColumnAvailable = false
+        const retryRows = upserts.map((note) => ({
           id: note.id,
           user_id: note.userId,
           group_id: note.groupId,
@@ -141,15 +195,66 @@ async function pushNotes(userId: string) {
           created_at: note.createdAt,
           updated_at: note.updatedAt,
           deleted_at: note.deletedAt,
-        })),
-      )
-
-    if (error) throw error
+        }))
+        const retry = await supabase!.from('notes').upsert(retryRows)
+        if (retry.error) throw retry.error
+      } else {
+        throw error
+      }
+    }
   }
 
   for (const note of deletions) {
     const { error } = await supabase!.from('notes').delete().eq('id', note.id).eq('user_id', userId)
     if (error) throw error
+  }
+}
+
+async function pushTags(userId: string) {
+  if (noteTagsTableAvailable === false) return
+
+  const pendingTags = await db.noteTags.where('userId').equals(userId).toArray()
+
+  const upserts = pendingTags.filter((tag) => tag.syncState !== 'synced' && !tag.deletedAt)
+  const deletions = pendingTags.filter((tag) => tag.deletedAt)
+
+  if (upserts.length > 0) {
+    const { error } = await supabase!
+      .from('note_tags')
+      .upsert(
+        upserts.map((tag) => ({
+          id: tag.id,
+          user_id: tag.userId,
+          note_id: tag.noteId,
+          name: tag.name,
+          created_at: tag.createdAt,
+          updated_at: tag.updatedAt,
+          deleted_at: tag.deletedAt,
+        })),
+      )
+
+    if (error) {
+      if (isMissingTableError(error)) {
+        noteTagsTableAvailable = false
+        console.warn('Supabase note_tags table missing; tag sync disabled until schema is added')
+        return
+      }
+
+      throw error
+    }
+  }
+
+  for (const tag of deletions) {
+    const { error } = await supabase!.from('note_tags').delete().eq('id', tag.id).eq('user_id', userId)
+    if (error) {
+      if (isMissingTableError(error)) {
+        noteTagsTableAvailable = false
+        console.warn('Supabase note_tags table missing; tag sync disabled until schema is added')
+        return
+      }
+
+      throw error
+    }
   }
 }
 
@@ -234,10 +339,7 @@ async function pullGroups(userId: string) {
 }
 
 async function pullNotes(userId: string) {
-  const { data, error } = await supabase!
-    .from('notes')
-    .select('id,user_id,group_id,content,created_at,updated_at,deleted_at')
-    .eq('user_id', userId)
+  const { data, error } = await supabase!.from('notes').select('*').eq('user_id', userId)
 
   if (error) throw error
 
@@ -253,6 +355,38 @@ async function pullNotes(userId: string) {
     for (const note of localNotes) {
       if (!remoteIds.has(note.id) && note.syncState === 'synced') {
         await db.notes.delete(note.id)
+      }
+    }
+  })
+}
+
+async function pullTags(userId: string) {
+  if (noteTagsTableAvailable === false) return
+
+  const { data, error } = await supabase!.from('note_tags').select('*').eq('user_id', userId)
+
+  if (error) {
+    if (isMissingTableError(error)) {
+      noteTagsTableAvailable = false
+      console.warn('Supabase note_tags table missing; tag sync disabled until schema is added')
+      return
+    }
+
+    throw error
+  }
+
+  const remoteTags = (data ?? []) as RemoteNoteTag[]
+  const remoteIds = new Set(remoteTags.map((row) => row.id))
+
+  await db.transaction('rw', db.noteTags, async () => {
+    for (const row of remoteTags) {
+      await db.noteTags.put(toLocalTag(row))
+    }
+
+    const localTags = await db.noteTags.where('userId').equals(userId).toArray()
+    for (const tag of localTags) {
+      if (!remoteIds.has(tag.id) && tag.syncState === 'synced') {
+        await db.noteTags.delete(tag.id)
       }
     }
   })
@@ -301,9 +435,11 @@ export async function syncWithSupabase(session: Session | null) {
   await pushGroups(userId)
   await pushNotes(userId)
   await pushAttachments(userId)
+  await pushTags(userId)
   await pullGroups(userId)
   await pullNotes(userId)
   await pullAttachments(userId)
+  await pullTags(userId)
 
   const localGroups = await db.groups.where('userId').equals(userId).toArray()
   const localNotes = await db.notes.where('userId').equals(userId).toArray()
@@ -329,6 +465,15 @@ export async function syncWithSupabase(session: Session | null) {
       })),
     )
   }
+  if (noteTagsTableAvailable !== false) {
+    const localTags = await db.noteTags.where('userId').equals(userId).toArray()
+    await db.noteTags.bulkPut(
+      localTags.map((tag) => ({
+        ...tag,
+        syncState: 'synced',
+      })),
+    )
+  }
 
   const deletedGroups = await db.groups.where('userId').equals(userId).and((group) => group.deletedAt !== null).toArray()
   const deletedNotes = await db.notes.where('userId').equals(userId).and((note) => note.deletedAt !== null).toArray()
@@ -338,6 +483,7 @@ export async function syncWithSupabase(session: Session | null) {
     .equals(userId)
     .and((attachment) => attachment.deletedAt !== null)
     .toArray()
+  const deletedTags = await db.noteTags.where('userId').equals(userId).and((tag) => tag.deletedAt !== null).toArray()
 
   for (const group of deletedGroups) {
     await db.groups.delete(group.id)
@@ -347,5 +493,8 @@ export async function syncWithSupabase(session: Session | null) {
   }
   for (const attachment of deletedAttachments) {
     await db.noteAttachments.delete(attachment.id)
+  }
+  for (const tag of deletedTags) {
+    await db.noteTags.delete(tag.id)
   }
 }

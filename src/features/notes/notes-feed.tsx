@@ -10,7 +10,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from 'react'
-import { RiDeleteBin6Line, RiPencilLine, RiImageAddLine, RiCloseLine } from '@remixicon/react'
+import { RiDeleteBin6Line, RiPencilLine, RiImageAddLine, RiCloseLine, RiPushpinLine } from '@remixicon/react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -23,7 +23,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { useAppStore } from '@/hooks/use-app-store'
-import type { LocalNoteAttachment } from '@/lib/db'
+import type { LocalNoteAttachment, LocalNoteTag } from '@/lib/db'
 import type { DraftAttachment } from '@/lib/note-attachments'
 
 const MarkdownRenderer = lazy(() => import('@/components/markdown-renderer'))
@@ -34,6 +34,21 @@ type DraftAttachmentItem = DraftAttachment
 
 function sortAttachments(attachments: LocalNoteAttachment[]) {
   return [...attachments].sort((left, right) => left.sortOrder - right.sortOrder)
+}
+
+function sortTags(tags: LocalNoteTag[]) {
+  return [...tags].sort((left, right) => left.name.localeCompare(right.name))
+}
+
+function parseTagInput(value: string) {
+  return Array.from(
+    new Set(
+      value
+        .split(',')
+        .map((tag) => tag.trim().replace(/^#/, '').toLowerCase())
+        .filter(Boolean),
+    ),
+  )
 }
 
 function readFileAsDataUrl(file: File) {
@@ -163,17 +178,20 @@ function DraftAttachmentGrid({
 function NoteEditDialog({
   note,
   attachments,
+  tags,
   onClose,
   onSave,
 }: {
   note: { id: string; content: string }
   attachments: LocalNoteAttachment[]
+  tags: string[]
   onClose: () => void
-  onSave: (content: string, attachments: DraftAttachment[]) => void
+  onSave: (content: string, attachments: DraftAttachment[], tags: string[]) => void
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const bodyRef = useRef<HTMLTextAreaElement | null>(null)
   const [body, setBody] = useState(note.content)
+  const [tagText, setTagText] = useState(tags.join(', '))
   const [draftAttachments, setDraftAttachments] = useState<DraftAttachmentItem[]>(
     attachments.map((attachment) => ({
       id: attachment.id,
@@ -240,7 +258,7 @@ function NoteEditDialog({
       <DialogContent className="max-w-[92vw] sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Edit note</DialogTitle>
-          <DialogDescription>Update note text. Add or remove images. Cmd/Ctrl+Enter saves.</DialogDescription>
+          <DialogDescription>Update note text, tags, and images. Cmd/Ctrl+Enter saves.</DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
           <Textarea
@@ -251,6 +269,12 @@ function NoteEditDialog({
             onBeforeInput={blockBackspaceAtStart}
             onKeyDown={blockBackspaceAtStart}
             className="min-h-48 text-base leading-6 sm:text-sm"
+          />
+
+          <Input
+            value={tagText}
+            onChange={(event) => setTagText(event.target.value)}
+            placeholder="Tags, comma-separated"
           />
 
           <Input
@@ -291,7 +315,7 @@ function NoteEditDialog({
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
-            <Button
+          <Button
             onClick={() => {
               onSave(
                 body,
@@ -302,6 +326,7 @@ function NoteEditDialog({
                   dataUrl: attachment.dataUrl,
                   sortOrder: index,
                 })),
+                parseTagInput(tagText),
               )
               onClose()
             }}
@@ -315,7 +340,19 @@ function NoteEditDialog({
 }
 
 export function NotesFeed() {
-  const { groups, notes, attachments, selectedGroupId, searchQuery, editNote, deleteNote } = useAppStore()
+  const {
+    groups,
+    notes,
+    attachments,
+    noteTags,
+    selectedGroupId,
+    searchQuery,
+    tagFilter,
+    setTagFilter,
+    editNote,
+    deleteNote,
+    togglePinNote,
+  } = useAppStore()
   const deferredQuery = useDeferredValue(searchQuery.trim().toLowerCase())
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
   const [pendingEditId, setPendingEditId] = useState<string | null>(null)
@@ -338,13 +375,27 @@ export function NotesFeed() {
     return map
   }, [attachments])
 
+  const tagsByNoteId = useMemo(() => {
+    const map = new Map<string, LocalNoteTag[]>()
+
+    for (const tag of sortTags(noteTags)) {
+      const current = map.get(tag.noteId) ?? []
+      current.push(tag)
+      map.set(tag.noteId, current)
+    }
+
+    return map
+  }, [noteTags])
+
   const visibleNotes = useMemo(() => {
     return notes.filter((note) => {
-      const matchesSearch = deferredQuery ? note.content.toLowerCase().includes(deferredQuery) : true
+      const noteTagsText = tagsByNoteId.get(note.id)?.map((tag) => tag.name).join(' ') ?? ''
+      const matchesSearch = deferredQuery ? `${note.content} ${noteTagsText}`.toLowerCase().includes(deferredQuery) : true
+      const matchesTag = tagFilter ? tagsByNoteId.get(note.id)?.some((tag) => tag.name === tagFilter) : true
       const matchesGroup = deferredQuery ? true : selectedGroup ? note.groupId === selectedGroup.id : true
-      return matchesGroup && matchesSearch
+      return matchesGroup && matchesSearch && matchesTag
     })
-  }, [deferredQuery, notes, selectedGroup])
+  }, [deferredQuery, notes, selectedGroup, tagFilter, tagsByNoteId])
 
   const pendingEditNote = useMemo(
     () => notes.find((note) => note.id === pendingEditId) ?? null,
@@ -356,6 +407,11 @@ export function NotesFeed() {
     [attachmentsByNoteId, pendingEditId],
   )
 
+  const pendingEditTags = useMemo(
+    () => (pendingEditId ? tagsByNoteId.get(pendingEditId) ?? [] : []),
+    [pendingEditId, tagsByNoteId],
+  )
+
   return (
     <div className="flex min-h-0 flex-1 flex-col rounded-2xl border border-black/8 bg-white/75 shadow-[0_16px_40px_rgba(44,24,12,0.08)] backdrop-blur dark:border-white/10 dark:bg-black/25 lg:rounded-3xl">
       <div className="flex items-center justify-between border-b border-black/5 px-4 py-3 dark:border-white/10">
@@ -363,7 +419,19 @@ export function NotesFeed() {
           <p className="font-heading text-sm font-semibold">{selectedGroup?.name ?? 'No group'}</p>
           <p className="text-xs text-muted-foreground">Newest notes at bottom</p>
         </div>
-        <span className="text-xs text-muted-foreground">{visibleNotes.length} notes</span>
+        <div className="flex items-center gap-2">
+          {tagFilter ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 rounded-full px-3 text-[11px] uppercase tracking-[0.18em]"
+              onClick={() => setTagFilter(null)}
+            >
+              #{tagFilter} x
+            </Button>
+          ) : null}
+          <span className="text-xs text-muted-foreground">{visibleNotes.length} notes</span>
+        </div>
       </div>
 
       <div className="flex-1 space-y-3 overflow-y-auto px-3 py-3 sm:px-4 sm:py-4">
@@ -374,11 +442,15 @@ export function NotesFeed() {
         ) : (
           visibleNotes.map((note) => {
             const noteAttachments = attachmentsByNoteId.get(note.id) ?? []
+            const noteTags = tagsByNoteId.get(note.id) ?? []
 
             return (
               <article
                 key={note.id}
-                className="max-w-3xl rounded-2xl rounded-bl-md border border-black/5 bg-background px-3 py-3 shadow-sm dark:border-white/10 sm:px-4"
+                className={[
+                  'max-w-3xl rounded-2xl rounded-bl-md border bg-background px-3 py-3 shadow-sm dark:border-white/10 sm:px-4',
+                  note.pinnedAt ? 'border-primary/25 ring-1 ring-primary/10' : 'border-black/5',
+                ].join(' ')}
                 style={{
                   contentVisibility: 'auto',
                   containIntrinsicSize: '0 180px',
@@ -392,9 +464,23 @@ export function NotesFeed() {
                       {note.updatedAt !== note.createdAt ? (
                         <span className="normal-case tracking-normal text-muted-foreground">edited</span>
                       ) : null}
+                      {note.pinnedAt ? (
+                        <span className="rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 normal-case tracking-normal text-primary">
+                          pinned
+                        </span>
+                      ) : null}
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      className="h-8 w-8 shrink-0"
+                      aria-label={note.pinnedAt ? 'Unpin note' : 'Pin note'}
+                      onClick={() => void togglePinNote(note.id)}
+                    >
+                      <RiPushpinLine />
+                    </Button>
                     <Button
                       variant="ghost"
                       size="icon-xs"
@@ -428,6 +514,26 @@ export function NotesFeed() {
                   </Suspense>
                 </div>
 
+                {noteTags.length > 0 ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {noteTags.map((tag) => (
+                      <button
+                        key={tag.id}
+                        type="button"
+                        className={[
+                          'rounded-full border px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] transition',
+                          tagFilter === tag.name
+                            ? 'border-primary/30 bg-primary/10 text-primary'
+                            : 'border-border bg-muted/50 text-muted-foreground hover:border-ring/50 hover:bg-muted',
+                        ].join(' ')}
+                        onClick={() => setTagFilter(tagFilter === tag.name ? null : tag.name)}
+                      >
+                        #{tag.name}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
                 {noteAttachments.length > 0 ? (
                   <AttachmentGrid
                     attachments={sortAttachments(noteAttachments)}
@@ -445,9 +551,10 @@ export function NotesFeed() {
           key={pendingEditNote.id}
           note={pendingEditNote}
           attachments={pendingEditAttachments}
+          tags={pendingEditTags.map((tag) => tag.name)}
           onClose={() => setPendingEditId(null)}
-          onSave={(content, nextAttachments) => {
-            void editNote(pendingEditNote.id, content, nextAttachments)
+          onSave={(content, nextAttachments, nextTags) => {
+            void editNote(pendingEditNote.id, content, nextAttachments, nextTags)
           }}
         />
       ) : null}
@@ -456,7 +563,7 @@ export function NotesFeed() {
         <DialogContent className="max-w-[92vw] sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Delete note</DialogTitle>
-            <DialogDescription>This note and its attachments will be removed locally and synced to Supabase.</DialogDescription>
+            <DialogDescription>This note will move to undo state first, then sync delete to Supabase.</DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setPendingDeleteId(null)}>

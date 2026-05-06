@@ -27,7 +27,7 @@ import { useTheme } from '@/hooks/use-theme'
 
 export function AppShell() {
   const { session, loading, signOut } = useAuth()
-  const { searchQuery, setSearchQuery, syncNow, isSyncing } = useAppStore()
+  const { searchQuery, setSearchQuery, syncNow, isSyncing, undoDeleteLabel, undoDeleteNote } = useAppStore()
   const { theme, toggleTheme } = useTheme()
   const [groupsOpen, setGroupsOpen] = useState(false)
   const [infoOpen, setInfoOpen] = useState(false)
@@ -147,6 +147,24 @@ export function AppShell() {
           <span className="flex items-center gap-2">
             <RiLoader4Line className="animate-spin" />
             Syncing...
+          </span>
+        </div>
+      ) : null}
+
+      {undoDeleteLabel ? (
+        <div
+          className="fixed bottom-4 right-4 z-[60] w-[min(92vw,20rem)] rounded-2xl border border-border bg-background/95 px-3 py-2 text-sm shadow-lg backdrop-blur"
+          role="status"
+          aria-live="polite"
+        >
+          <span className="flex items-center gap-2">
+            <span className="min-w-0 flex-1">
+              <span className="block text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Deleted</span>
+              <span className="block truncate font-medium">{undoDeleteLabel}</span>
+            </span>
+            <Button variant="outline" size="sm" className="h-7 rounded-full px-3" onClick={() => void undoDeleteNote()}>
+              Undo
+            </Button>
           </span>
         </div>
       ) : null}

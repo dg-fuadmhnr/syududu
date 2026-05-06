@@ -53,32 +53,46 @@ async function compressImage(file: File) {
   return canvas.toDataURL('image/jpeg', 0.86)
 }
 
+function parseTagInput(value: string) {
+  return Array.from(
+    new Set(
+      value
+        .split(',')
+        .map((tag) => tag.trim().replace(/^#/, '').toLowerCase())
+        .filter(Boolean),
+    ),
+  )
+}
+
 export function QuickInputBar() {
   const { createNote } = useAppStore()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [content, setContent] = useState('')
+  const [tags, setTags] = useState('')
   const [images, setImages] = useState<DraftImage[]>([])
   const [saving, setSaving] = useState(false)
   const [readingImages, setReadingImages] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const save = async () => {
-  if (!content.trim() && images.length === 0) return
+    if (!content.trim() && images.length === 0) return
 
-  setSaving(true)
-  setError(null)
-  await createNote(
-    content,
-    images.map<NoteAttachmentInput>((image, index) => ({
-      name: image.name,
-      mimeType: image.mimeType,
-      dataUrl: image.src,
-      sortOrder: index,
-    })),
-  )
-  setContent('')
-  setImages([])
-  setSaving(false)
+    setSaving(true)
+    setError(null)
+    await createNote(
+      content,
+      images.map<NoteAttachmentInput>((image, index) => ({
+        name: image.name,
+        mimeType: image.mimeType,
+        dataUrl: image.src,
+        sortOrder: index,
+      })),
+      parseTagInput(tags),
+    )
+    setContent('')
+    setTags('')
+    setImages([])
+    setSaving(false)
   }
 
   const addFiles = async (files: FileList | File[]) => {
@@ -150,6 +164,13 @@ export function QuickInputBar() {
             className="min-h-28 w-full resize-y rounded-2xl border border-input bg-background px-4 py-3 text-base leading-6 outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20 sm:text-sm"
           />
 
+          <Input
+            aria-label="Note tags"
+            placeholder="Tags, comma-separated"
+            value={tags}
+            onChange={(event) => setTags(event.target.value)}
+          />
+
           {images.length > 0 ? (
             <div className="grid gap-2 sm:grid-cols-2">
               {images.map((image) => (
@@ -214,7 +235,7 @@ export function QuickInputBar() {
         </div>
       </div>
       <p className="mt-2 text-xs text-muted-foreground">
-        Markdown supported. Images paste/drop/upload. Multiple images okay. `Cmd/Ctrl+Enter` saves.
+        Markdown supported. Images paste/drop/upload. Tags comma-separated. `Cmd/Ctrl+Enter` saves.
       </p>
       {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
     </div>
