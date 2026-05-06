@@ -357,6 +357,21 @@ export function NotesFeed() {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
   const [pendingEditId, setPendingEditId] = useState<string | null>(null)
   const [previewAttachment, setPreviewAttachment] = useState<LightboxAttachment | null>(null)
+  const [exitingNoteId, setExitingNoteId] = useState<string | null>(null)
+  const [pinnedNoteId, setPinnedNoteId] = useState<string | null>(null)
+  const deleteTimerRef = useRef<number | null>(null)
+  const pinTimerRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (deleteTimerRef.current !== null) {
+        window.clearTimeout(deleteTimerRef.current)
+      }
+      if (pinTimerRef.current !== null) {
+        window.clearTimeout(pinTimerRef.current)
+      }
+    }
+  }, [])
 
   const selectedGroup = useMemo(
     () => groups.find((group) => group.id === selectedGroupId) ?? groups[0] ?? null,
@@ -424,7 +439,7 @@ export function NotesFeed() {
             <Button
               variant="outline"
               size="sm"
-              className="h-7 rounded-full px-3 text-[11px] uppercase tracking-[0.18em]"
+              className="h-7 rounded-full px-3 text-[11px] uppercase tracking-[0.18em] motion-safe:transition-all motion-safe:duration-200"
               onClick={() => setTagFilter(null)}
             >
               #{tagFilter} x
@@ -440,7 +455,7 @@ export function NotesFeed() {
             No notes yet. Capture one below.
           </div>
         ) : (
-          visibleNotes.map((note) => {
+          visibleNotes.map((note, index) => {
             const noteAttachments = attachmentsByNoteId.get(note.id) ?? []
             const noteTags = tagsByNoteId.get(note.id) ?? []
 
@@ -448,12 +463,15 @@ export function NotesFeed() {
               <article
                 key={note.id}
                 className={[
-                  'max-w-3xl rounded-2xl rounded-bl-md border bg-background px-3 py-3 shadow-sm dark:border-white/10 sm:px-4',
+                  'max-w-3xl rounded-2xl rounded-bl-md border bg-background px-3 py-3 shadow-sm motion-safe:animate-[fade-up_240ms_ease-out] motion-safe:transition-[opacity,transform,box-shadow] motion-safe:duration-200 hover:-translate-y-0.5 dark:border-white/10 sm:px-4',
+                  exitingNoteId === note.id ? 'pointer-events-none opacity-0 translate-y-2 scale-[0.98]' : 'opacity-100',
+                  pinnedNoteId === note.id ? 'motion-safe:animate-[soft-pop_180ms_ease-out]' : '',
                   note.pinnedAt ? 'border-primary/25 ring-1 ring-primary/10' : 'border-black/5',
                 ].join(' ')}
                 style={{
                   contentVisibility: 'auto',
                   containIntrinsicSize: '0 180px',
+                  animationDelay: `${Math.min(index, 10) * 35}ms`,
                 }}
               >
                 <div className="mb-2 flex items-start justify-between gap-3 text-[11px] uppercase tracking-[0.25em] text-muted-foreground">
@@ -475,9 +493,22 @@ export function NotesFeed() {
                     <Button
                       variant="ghost"
                       size="icon-xs"
-                      className="h-8 w-8 shrink-0"
+                      className={[
+                        'h-8 w-8 shrink-0 transition-transform motion-safe:duration-200',
+                        pinnedNoteId === note.id ? 'scale-110' : '',
+                      ].join(' ')}
                       aria-label={note.pinnedAt ? 'Unpin note' : 'Pin note'}
-                      onClick={() => void togglePinNote(note.id)}
+                      onClick={() => {
+                        setPinnedNoteId(note.id)
+                        if (pinTimerRef.current !== null) {
+                          window.clearTimeout(pinTimerRef.current)
+                        }
+                        pinTimerRef.current = window.setTimeout(() => {
+                          setPinnedNoteId((current) => (current === note.id ? null : current))
+                          pinTimerRef.current = null
+                        }, 180)
+                        void togglePinNote(note.id)
+                      }}
                     >
                       <RiPushpinLine />
                     </Button>
@@ -521,7 +552,7 @@ export function NotesFeed() {
                         key={tag.id}
                         type="button"
                         className={[
-                          'rounded-full border px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] transition',
+                          'rounded-full border px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] transition motion-safe:transition-all motion-safe:duration-200',
                           tagFilter === tag.name
                             ? 'border-primary/30 bg-primary/10 text-primary'
                             : 'border-border bg-muted/50 text-muted-foreground hover:border-ring/50 hover:bg-muted',
@@ -573,7 +604,17 @@ export function NotesFeed() {
               variant="destructive"
               onClick={() => {
                 if (pendingDeleteId) {
-                  void deleteNote(pendingDeleteId)
+                  const targetId = pendingDeleteId
+                  setExitingNoteId(targetId)
+                  if (deleteTimerRef.current !== null) {
+                    window.clearTimeout(deleteTimerRef.current)
+                  }
+                  deleteTimerRef.current = window.setTimeout(() => {
+                    void deleteNote(targetId).finally(() => {
+                      setExitingNoteId((current) => (current === targetId ? null : current))
+                      deleteTimerRef.current = null
+                    })
+                  }, 160)
                 }
                 setPendingDeleteId(null)
               }}

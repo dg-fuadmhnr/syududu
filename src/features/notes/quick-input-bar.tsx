@@ -136,7 +136,7 @@ export function QuickInputBar() {
   }
 
   return (
-    <div className="rounded-2xl border border-black/8 bg-white/80 p-3 shadow-[0_16px_40px_rgba(44,24,12,0.08)] backdrop-blur dark:border-white/10 dark:bg-black/25 lg:rounded-3xl">
+    <div className="rounded-2xl border border-black/8 bg-white/80 p-3 shadow-[0_16px_40px_rgba(44,24,12,0.08)] backdrop-blur motion-safe:animate-[float-in_300ms_ease-out] dark:border-white/10 dark:bg-black/25 lg:rounded-3xl">
       <div className="grid gap-3 md:grid-cols-[1fr_auto]">
         <div className="grid gap-3">
           <textarea
@@ -161,7 +161,7 @@ export function QuickInputBar() {
                 void save()
               }
             }}
-            className="min-h-28 w-full resize-y rounded-2xl border border-input bg-background px-4 py-3 text-base leading-6 outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20 sm:text-sm"
+            className="min-h-28 w-full resize-y rounded-2xl border border-input bg-background px-4 py-3 text-base leading-6 outline-none transition motion-safe:transition-all motion-safe:duration-200 focus:border-ring focus:ring-2 focus:ring-ring/20 sm:text-sm"
           />
 
           <Input
@@ -169,6 +169,7 @@ export function QuickInputBar() {
             placeholder="Tags, comma-separated"
             value={tags}
             onChange={(event) => setTags(event.target.value)}
+            className="motion-safe:transition-all motion-safe:duration-200"
           />
 
           {images.length > 0 ? (
@@ -176,7 +177,7 @@ export function QuickInputBar() {
               {images.map((image) => (
                 <div
                   key={image.id}
-                  className="flex items-start gap-3 rounded-2xl border border-border bg-muted/30 p-2"
+                  className="flex items-start gap-3 rounded-2xl border border-border bg-muted/30 p-2 motion-safe:animate-[fade-up_220ms_ease-out]"
                 >
                   <img
                     alt={image.name}

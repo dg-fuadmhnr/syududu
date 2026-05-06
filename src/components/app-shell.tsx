@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import {
   RiInformationLine,
@@ -31,6 +31,34 @@ export function AppShell() {
   const { theme, toggleTheme } = useTheme()
   const [groupsOpen, setGroupsOpen] = useState(false)
   const [infoOpen, setInfoOpen] = useState(false)
+  const [undoToast, setUndoToast] = useState<{ label: string; closing: boolean } | null>(null)
+  const previousUndoLabelRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (undoDeleteLabel) {
+      previousUndoLabelRef.current = undoDeleteLabel
+      const timer = window.setTimeout(() => {
+        setUndoToast({ label: undoDeleteLabel, closing: false })
+      }, 0)
+      return () => {
+        window.clearTimeout(timer)
+      }
+    }
+
+    if (previousUndoLabelRef.current !== null) {
+      previousUndoLabelRef.current = null
+      const timer = window.setTimeout(() => {
+        setUndoToast((current) => (current ? { ...current, closing: true } : current))
+        window.setTimeout(() => {
+          setUndoToast(null)
+        }, 180)
+      }, 180)
+
+      return () => {
+        window.clearTimeout(timer)
+      }
+    }
+  }, [undoDeleteLabel])
 
   if (loading) {
     return (
@@ -47,7 +75,7 @@ export function AppShell() {
   return (
     <div className="min-h-dvh bg-[radial-gradient(circle_at_top,_rgba(120,70,30,0.16),_transparent_32%),linear-gradient(180deg,_#f7f3ed_0%,_#efe7dd_100%)] text-foreground dark:bg-[radial-gradient(circle_at_top,_rgba(120,70,30,0.22),_transparent_28%),linear-gradient(180deg,_#16110d_0%,_#0f0b09_100%)]">
       <div className="mx-auto flex min-h-dvh w-full max-w-7xl flex-col px-2 py-2 sm:px-4 sm:py-3 lg:px-6">
-        <header className="mb-2 flex flex-col gap-3 rounded-2xl border border-black/8 bg-white/70 px-3 py-3 shadow-[0_16px_40px_rgba(44,24,12,0.08)] backdrop-blur dark:border-white/10 dark:bg-black/25 lg:mb-3 lg:flex-row lg:items-center lg:justify-between lg:rounded-3xl lg:px-4">
+        <header className="mb-2 flex flex-col gap-3 rounded-2xl border border-black/8 bg-white/70 px-3 py-3 shadow-[0_16px_40px_rgba(44,24,12,0.08)] backdrop-blur motion-safe:animate-[float-in_320ms_ease-out] dark:border-white/10 dark:bg-black/25 lg:mb-3 lg:flex-row lg:items-center lg:justify-between lg:rounded-3xl lg:px-4">
           <div>
             <p className="font-heading text-[11px] uppercase tracking-[0.35em] text-muted-foreground">
               syududu
@@ -109,7 +137,7 @@ export function AppShell() {
             <GroupsSidebar />
           </aside>
 
-          <section className="flex min-h-0 flex-1 flex-col gap-2 sm:gap-3">
+          <section className="flex min-h-0 flex-1 flex-col gap-2 sm:gap-3 motion-safe:animate-[fade-up_260ms_ease-out]">
             <NotesFeed />
             <QuickInputBar />
           </section>
@@ -151,16 +179,21 @@ export function AppShell() {
         </div>
       ) : null}
 
-      {undoDeleteLabel ? (
+      {undoToast ? (
         <div
-          className="fixed bottom-4 right-4 z-[60] w-[min(92vw,20rem)] rounded-2xl border border-border bg-background/95 px-3 py-2 text-sm shadow-lg backdrop-blur"
+          className={[
+            'fixed bottom-4 left-1/2 z-[60] w-[min(92vw,20rem)] -translate-x-1/2 rounded-2xl border border-border bg-background/95 px-3 py-2 text-sm shadow-lg backdrop-blur sm:bottom-5',
+            undoToast.closing
+              ? 'opacity-0 translate-y-2 scale-[0.98] transition-all duration-150'
+              : 'motion-safe:animate-[toast-in_180ms_ease-out]',
+          ].join(' ')}
           role="status"
           aria-live="polite"
         >
           <span className="flex items-center gap-2">
             <span className="min-w-0 flex-1">
               <span className="block text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Deleted</span>
-              <span className="block truncate font-medium">{undoDeleteLabel}</span>
+              <span className="block truncate font-medium">{undoToast.label}</span>
             </span>
             <Button variant="outline" size="sm" className="h-7 rounded-full px-3" onClick={() => void undoDeleteNote()}>
               Undo

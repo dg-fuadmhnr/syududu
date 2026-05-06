@@ -44,7 +44,7 @@ export function GroupsSidebar() {
   }
 
   return (
-    <div className="flex h-full flex-col rounded-2xl border border-black/8 bg-white/75 p-3 shadow-[0_16px_40px_rgba(44,24,12,0.08)] backdrop-blur dark:border-white/10 dark:bg-black/25 lg:rounded-3xl">
+    <div className="flex h-full flex-col rounded-2xl border border-black/8 bg-white/75 p-3 shadow-[0_16px_40px_rgba(44,24,12,0.08)] backdrop-blur motion-safe:animate-[float-in_300ms_ease-out] dark:border-white/10 dark:bg-black/25 lg:rounded-3xl">
       <div className="flex items-center justify-between px-1 py-2">
         <div>
           <p className="font-heading text-sm font-semibold">Channels</p>
@@ -56,18 +56,19 @@ export function GroupsSidebar() {
       </div>
 
       <div className="mt-2 flex gap-2 overflow-x-auto pb-1 lg:grid lg:overflow-visible lg:pb-0">
-        {groups.map((group) => {
+        {groups.map((group, index) => {
           const active = group.id === selectedGroupId
 
           return (
             <button
               key={group.id}
               className={[
-                'flex min-w-[140px] flex-1 items-center justify-between rounded-2xl border px-3 py-3 text-left transition lg:min-w-0',
+                'flex min-w-[140px] flex-1 items-center justify-between rounded-2xl border px-3 py-3 text-left transition motion-safe:animate-[fade-up_220ms_ease-out] motion-safe:transition-transform motion-safe:duration-200 hover:-translate-y-0.5 lg:min-w-0',
                 active
                   ? 'border-primary/30 bg-primary/10 text-foreground'
                   : 'border-transparent bg-muted/60 text-muted-foreground hover:border-border hover:bg-muted',
               ].join(' ')}
+              style={{ animationDelay: `${index * 35}ms` }}
               onClick={() => setSelectedGroupId(group.id)}
               type="button"
             >
